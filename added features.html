@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dataverse Support Tool (SPA)</title>
+  <script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js" integrity="sha384-q8YkymlfglZVhE5YzCmf3jv95nQKXtcwhkZy7hHxu8xj+qhu50bS6+Z9+MQUMk8F" crossorigin="anonymous"></script>
+  <style>
+    :root { --bg:#0b1020; --card:#121a35; --muted:#9fb0d1; --text:#e8f0ff; --accent:#4aa3ff; --danger:#ff5470; }
+    *{ box-sizing:border-box; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', Arial; }
+    body{ margin:0; background:linear-gradient(160deg,#0a0f22,#0e1630 55%,#0a1026); color:var(--text); }
+    header{ padding:18px 22px; display:flex; align-items:center; gap:12px; border-bottom:1px solid #1e2b56; position: sticky; top: 0; backdrop-filter: blur(6px); background:#0b1020cc; }
+    header h1{ font-size:18px; margin:0; letter-spacing:.3px; }
+    .container{ max-width:1100px; margin:24px auto; padding:0 16px 80px; }
+    .grid{ display:grid; grid-template-columns: 1fr; gap:16px; }
+    @media(min-width:900px){ .grid{ grid-template-columns: 2fr 3fr; } }
+    .card{ background:var(--card); border:1px solid #1e2b56; border-radius:14px; padding:16px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+    .card h2{ font-size:16px; margin:0 0 12px; color:#cfe1ff; }
+    label{ display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
+    input, select, button, textarea{ width:100%; border-radius:10px; border:1px solid #29407c; background:#0c1330; color:var(--text); padding:10px 12px; }
+    input:focus, select:focus, textarea:focus{ outline:none; border-color:var(--accent); box-shadow: 0 0 0 3px #4aa3ff33; }
+    .row{ display:grid; grid-template-columns: 1fr; gap:12px; }
+    @media(min-width:700px){ .row-2{ grid-template-columns: 1fr 1fr; } }
+    .btn{ cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:10px 12px; border-radius:10px; border:1px solid #2a4988; background:#10214d; color:#cfe1ff; }
+    .btn:hover{ background:#0f1d45; }
+    .btn[disabled]{ opacity:.5; cursor:not-allowed; }
+    .btn.primary{ background:linear-gradient(180deg,#2266ff,#1649c9); border-color:#1649c9; }
+    .btn.danger{ background:linear-gradient(180deg,#ff4d6d,#d73b56); border-color:#d73b56; }
+    .status{ font-size:12px; color:var(--muted); margin-top:6px; }
+    .kpi{ display:flex; gap:16px; flex-wrap:wrap; }
+    .pill{ background:#0b1436; border:1px solid #26458b; border-radius:999px; padding:6px 10px; font-size:12px; color:#c9d8ff; }
+    table{ width:100%; border-collapse:collapse; }
+    th, td{ border-bottom:1px solid #26356a; padding:8px 6px; font-size:12px; text-align:left; }
+    pre{ margin:0; white-space:pre-wrap; word-break:break-word; }
+    .hint{ font-size:11px; color:#a6b7dc; }
+    .muted{ color:#9fb0d1; }
+    .danger-text{ color:var(--danger); font-weight:600; }
+    .ok{ color:#74ffa6; font-weight:600; }
+    .footer{ font-size:11px; margin-top:16px; color:#9fb0d1; }
+    .inline{ display:flex; gap:8px; align-items:center; }
+    .tag{ font-size:10px; opacity:.8; margin-left:6px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Dataverse Support Tool · SPA (MSAL + Web API)</h1>
+    <div class="kpi" style="margin-left:auto">
+      <span class="pill" id="kpi-tenant">tenant: <strong>common</strong></span>
+      <span class="pill" id="kpi-account">signed out</span>
+      <span class="pill" id="kpi-scope">scope: –</span>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="grid">
+      <!-- AUTH / SETTINGS -->
+      <section class="card">
+        <h2>Auth & Org</h2>
+        <div class="row">
+          <div>
+            <label>Client ID (SPA)</label>
+            <input id="clientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+            <div class="hint">Your Entra app registration (platform: Single-page application). Stored locally.</div>
+          </div>
+          <div>
+            <label>Tenant ID (or <code>common</code> for multi-tenant)</label>
+            <input id="tenantId" placeholder="common or your-tenant-guid" />
+          </div>
+          <div>
+            <label>Org base URL</label>
+            <input id="orgUrl" placeholder="https://org12345.crm.dynamics.com" />
+            <div class="hint">Used to compose the resource-specific scope <code>https://&lt;org&gt;.crm.dynamics.com/user_impersonation</code> and Web API calls.</div>
+          </div>
+        </div>
+        <div class="row row-2" style="margin-top:12px">
+          <button class="btn primary" id="btnInit">Initialize MSAL</button>
+          <div class="inline">
+            <button class="btn" id="btnLogin">Sign in</button>
+            <button class="btn" id="btnLogout">Sign out</button>
+          </div>
+        </div>
+        <div class="status" id="authStatus">MSAL not initialized.</div>
+      </section>
+
+      <!-- TOOL -->
+      <section class="card">
+        <h2>Dependency Check & Safe Delete</h2>
+        <div class="row row-2">
+          <div>
+            <label>Object GUID</label>
+            <input id="objectId" placeholder="e.g., 7437ad45-637e-f011-b4cc-000d3a3b163b" />
+          </div>
+          <div>
+            <label>Component Type <span class="tag" title="Loaded from the global option set 'componenttype'">(auto-loaded)</span></label>
+            <select id="componentType"><option>Loading…</option></select>
+            <div class="hint">We populate this from the <code>componenttype</code> global choice so you get <em>all</em> current types (e.g., App Action, Model-driven App, etc.). Types marked “deps‑only” can’t be deleted generically via a single endpoint.</div>
+          </div>
+        </div>
+        <div class="row row-2" style="margin-top:12px">
+          <button class="btn" id="btnDeps">Retrieve dependencies</button>
+          <button class="btn danger" id="btnDelete" disabled>Delete component</button>
+        </div>
+
+        <div class="row" style="margin-top:8px; align-items:center">
+          <label class="inline"><input type="checkbox" id="toggleDependents" style="width:auto"/> Also list downstream dependents <span class="tag">RetrieveDependentComponents</span></label>
+        </div>
+
+        <div class="status" id="depsStatus">—</div>
+
+        <div id="depsTables" style="margin-top:10px; display:none">
+          <h3 style="font-size:13px; margin:10px 0 4px">Blocking dependencies (RetrieveDependenciesForDelete)</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Dependent Type</th>
+                <th>Dependent Object</th>
+                <th>Required Type</th>
+                <th>Required Object</th>
+                <th>Relationship</th>
+              </tr>
+            </thead>
+            <tbody id="depsBody"></tbody>
+          </table>
+
+          <div id="downstreamWrap" style="display:none; margin-top:14px">
+            <h3 style="font-size:13px; margin:10px 0 4px">Downstream dependents (RetrieveDependentComponents)</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Dependent Type</th>
+                  <th>Dependent Object</th>
+                  <th>Required Type</th>
+                  <th>Required Object</th>
+                  <th>Relationship</th>
+                </tr>
+              </thead>
+              <tbody id="downstreamBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <details style="margin-top:12px">
+          <summary>Advanced · raw response</summary>
+          <pre id="raw"></pre>
+        </details>
+        <div class="footer">Delete is enabled only when <span class="ok">no blocking dependencies</span> are found and after confirmation.</div>
+      </section>
+
+      <!-- CONFIRM -->
+      <section class="card" style="grid-column: 1 / span 2">
+        <h2>Danger zone</h2>
+        <div class="row row-2">
+          <div>
+            <label>Type <span class="danger-text">DELETE</span> to enable deletion</label>
+            <input id="confirmText" placeholder="DELETE" />
+          </div>
+          <div>
+            <label>Dry‑run (skip real DELETE)</label>
+            <select id="dryRun"><option value="true">true</option><option value="false">false</option></select>
+          </div>
+        </div>
+        <div class="status" id="deleteStatus">—</div>
+      </section>
+
+    </div>
+
+    <div class="footer">Tip: Use this in a clean browser profile. The app stores minimal settings in <code>localStorage</code> (clientId, tenantId, orgUrl).</div>
+  </div>
+
+<script>
+(() => {
+  // --- State ---
+  let msalApp = null;
+  let activeAccount = null;
+
+  // Metadata cache for component types
+  let componentTypeOptions = new Map(); // number -> label
+
+  // --- Elements ---
+  const el = (id) => document.getElementById(id);
+  const $clientId = el('clientId');
+  const $tenantId = el('tenantId');
+  const $orgUrl = el('orgUrl');
+  const $btnInit = el('btnInit');
+  const $btnLogin = el('btnLogin');
+  const $btnLogout = el('btnLogout');
+  const $authStatus = el('authStatus');
+  const $kpiTenant = el('kpi-tenant');
+  const $kpiAccount = el('kpi-account');
+  const $kpiScope = el('kpi-scope');
+
+  const $objectId = el('objectId');
+  const $componentType = el('componentType');
+  const $btnDeps = el('btnDeps');
+  const $btnDelete = el('btnDelete');
+  const $depsStatus = el('depsStatus');
+  const $depsTables = el('depsTables');
+  const $depsBody = el('depsBody');
+  const $downstreamWrap = el('downstreamWrap');
+  const $downstreamBody = el('downstreamBody');
+  const $raw = el('raw');
+
+  const $confirmText = el('confirmText');
+  const $dryRun = el('dryRun');
+  const $deleteStatus = el('deleteStatus');
+  const $toggleDependents = el('toggleDependents');
+
+  // --- Utils ---
+  const saveSettings = () => {
+    localStorage.setItem('dv_clientId', $clientId.value.trim());
+    localStorage.setItem('dv_tenantId', $tenantId.value.trim() || 'common');
+    localStorage.setItem('dv_orgUrl', $orgUrl.value.trim());
+  };
+  const loadSettings = () => {
+    $clientId.value = localStorage.getItem('dv_clientId') || '';
+    $tenantId.value = localStorage.getItem('dv_tenantId') || 'common';
+    $orgUrl.value = localStorage.getItem('dv_orgUrl') || '';
+    $kpiTenant.innerHTML = `tenant: <strong>${$tenantId.value || 'common'}</strong>`;
+  };
+  const isGuid = (s) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test((s||'').trim());
+  const validOrg = (u) => /^https:\/\/[^.]+\.crm(\d+)?\.dynamics\.com\/?$/i.test((u||'').trim());
+
+  const componentTypeLabel = (n) => componentTypeOptions.get(Number(n)) || String(n);
+
+  // Types we can delete with a direct entity set endpoint using only the GUID
+  const DELETION_SUPPORTED = new Set([
+    1,   // EntityDefinitions (metadata)
+    24,  // Form (legacy) -> systemforms
+    26,  // SavedQuery
+    29,  // Workflow
+    31,  // Report
+    59,  // SavedQuery Visualization
+    60,  // System Form
+    61,  // Web Resource
+    62,  // Site Map
+    63,  // Connection Role
+    66,  // Custom Control
+    68,  // Custom Control Default Config
+    70,  // Field Security Profile
+    71,  // Field Permission
+    90,91,92,93, // Plugin assets
+    95,  // Service Endpoint
+    150,151, // Routing Rule & Item
+    152,153, // SLA & Item
+    154,155, // Convert Rule & Item
+    161,162, // Mobile Offline Profile & Item
+    165, // Similarity Rule
+    300, // Canvas App
+    380,381, // Env Var Def/Value
+    430,431,432 // Analytics/Image configs
+  ]);
+
+  // Known mappings by numeric ComponentType -> entity set path segment
+  const ENTITY_SET_BY_CT = {
+    1:   'EntityDefinitions',
+    24:  'systemforms',
+    26:  'savedqueries',
+    29:  'workflows',
+    31:  'reports',
+    59:  'savedqueryvisualizations',
+    60:  'systemforms',
+    61:  'webresourceset',
+    62:  'sitemaps',
+    63:  'connectionroles',
+    66:  'customcontrols',
+    68:  'customcontroldefaultconfigs',
+    70:  'fieldsecurityprofiles',
+    71:  'fieldpermissions',
+    90:  'plugintypes',
+    91:  'pluginassemblies',
+    92:  'sdkmessageprocessingsteps',
+    93:  'sdkmessageprocessingstepimages',
+    95:  'serviceendpoints',
+    150: 'routingrules',
+    151: 'routingruleitems',
+    152: 'slas',
+    153: 'slaitems',
+    154: 'convertrules',
+    155: 'convertruleitems',
+    161: 'mobileofflineprofiles',
+    162: 'mobileofflineprofileitems',
+    165: 'similarityrules',
+    300: 'canvasapps',
+    380: 'environmentvariabledefinitions',
+    381: 'environmentvariablevalues',
+    430: 'entityanalyticsconfigs',
+    431: 'attributeimageconfigs',
+    432: 'entityimageconfigs'
+  };
+
+  // Some newer component types aren't yet in the default list or you may not know their numeric value.
+  // Fall back by label -> entity set mapping. (Case-insensitive labels)
+  const ENTITY_SET_BY_LABEL = {
+    'app action': 'appactions', // Modern commanding
+    'model-driven app': 'appmodules',
+    'app module': 'appmodules'
+  };
+
+  function buildDeleteUrl(orgUrl, componentType, guid, label){
+    const base = orgUrl.replace(/\/$/, '') + '/api/data/v9.2/';
+    const ct = Number(componentType);
+
+    // Special-case: Global Option Set (metadata)
+    if (ct === 9) return base + `GlobalOptionSetDefinitions(${guid})`;
+
+    const setByCt = ENTITY_SET_BY_CT[ct];
+    if (setByCt) return base + `${setByCt}(${guid})`;
+
+    // Fallback: try by label
+    const setByLabel = label && ENTITY_SET_BY_LABEL[label.toLowerCase()];
+    if (setByLabel) return base + `${setByLabel}(${guid})`;
+
+    return null; // unknown/unsupported generic delete
+  }
+
+  function getScope(){
+    const org = $orgUrl.value.trim();
+    return org ? `${org.replace(/\/$/, '')}/user_impersonation` : null;
+  }
+
+  function msalConfig(){
+    const tenant = ($tenantId.value.trim() || 'common');
+    const redirectUri = window.location.origin + window.location.pathname;
+    return {
+      auth: {
+        clientId: $clientId.value.trim(),
+        authority: `https://login.microsoftonline.com/${tenant}`,
+        redirectUri
+      },
+      cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: true }
+    };
+  }
+
+  async function ensureMsal(){
+    if (msalApp) return;
+    const cfg = msalConfig();
+    if(!cfg.auth.clientId) throw new Error('Client ID is required.');
+    if(!validOrg($orgUrl.value)) throw new Error('Org base URL looks invalid.');
+    msalApp = new msal.PublicClientApplication(cfg);
+    await msalApp.initialize();
+    const redirect = await msalApp.handleRedirectPromise().catch(console.warn);
+    const accounts = msalApp.getAllAccounts();
+    if (accounts.length) {
+      activeAccount = accounts[0];
+      msalApp.setActiveAccount(activeAccount);
+    }
+    $authStatus.textContent = 'MSAL ready.';
+  }
+
+  function setUiAuth(){
+    $kpiTenant.innerHTML = `tenant: <strong>${$tenantId.value || 'common'}</strong>`;
+    const scope = getScope();
+    $kpiScope.textContent = 'scope: ' + (scope || '—');
+    $kpiAccount.textContent = activeAccount ? `acct: ${activeAccount.username}` : 'signed out';
+  }
+
+  async function login(){
+    await ensureMsal();
+    const scope = getScope();
+    const loginRequest = { scopes: [scope] };
+    try {
+      const result = await msalApp.loginPopup(loginRequest);
+      activeAccount = result.account;
+      msalApp.setActiveAccount(activeAccount);
+      $authStatus.textContent = 'Signed in.';
+      await hydrateComponentTypes();
+    } catch(e){
+      $authStatus.textContent = 'Sign-in failed: ' + (e.message || e);
+      throw e;
+    } finally {
+      setUiAuth();
+    }
+  }
+
+  async function logout(){
+    if(!msalApp){ $authStatus.textContent = 'MSAL not initialized.'; return; }
+    const acc = msalApp.getActiveAccount();
+    if(!acc){ $authStatus.textContent = 'No active account.'; return; }
+    await msalApp.logoutPopup({ account: acc });
+    activeAccount = null;
+    setUiAuth();
+    $authStatus.textContent = 'Signed out.';
+  }
+
+  async function acquireToken(){
+    await ensureMsal();
+    const scope = getScope();
+    const req = { scopes:[scope], account: activeAccount || msalApp.getActiveAccount() };
+    try { return (await msalApp.acquireTokenSilent(req)).accessToken; }
+    catch { return (await msalApp.acquireTokenPopup({ scopes:[scope] })).accessToken; }
+  }
+
+  function clearDepsTables(){
+    $depsBody.innerHTML = '';
+    $downstreamBody.innerHTML = '';
+    $depsTables.style.display = 'none';
+    $downstreamWrap.style.display = 'none';
+  }
+
+  // Populate the Component Type dropdown from the global option set metadata
+  async function hydrateComponentTypes(){
+    try{
+      const org = $orgUrl.value.trim().replace(/\/$/, '');
+      if(!validOrg(org)) return;
+      const token = await acquireToken();
+      const url = `${org}/api/data/v9.2/GlobalOptionSetDefinitions(Name='componenttype')?$select=Name&$expand=Options($select=Value,Label)`;
+      const res = await fetch(url, {
+        headers:{
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
+          'OData-MaxVersion':'4.0',
+          'OData-Version':'4.0'
+        }
+      });
+      const data = await res.json();
+      const options = (data.Options) || (data.value && data.value[0] && data.value[0].Options) || [];
+      componentTypeOptions.clear();
+      $componentType.innerHTML = '';
+      // Sort by numeric value for predictability
+      options.sort((a,b) => (a.Value - b.Value)).forEach(opt => {
+        const value = opt.Value;
+        const label = (opt.Label && (opt.Label.UserLocalizedLabel?.Label || (opt.Label.LocalizedLabels && opt.Label.LocalizedLabels[0]?.Label))) || String(value);
+        componentTypeOptions.set(value, label);
+        const isDepsOnly = !DELETION_SUPPORTED.has(value) && value !== 9; // allow GlobalOptionSetDefinitions delete
+        const optionEl = document.createElement('option');
+        optionEl.value = value;
+        optionEl.textContent = label + (isDepsOnly ? ' (deps-only)' : '');
+        $componentType.appendChild(optionEl);
+      });
+    } catch(e){
+      console.warn('Failed to hydrate component types, falling back to minimal list.', e);
+      // minimal fallback
+      const fallback = [
+        [1,'Entity'],[24,'Form'],[26,'Saved Query'],[29,'Workflow'],[31,'Report'],[59,'Saved Query Visualization'],[60,'System Form'],[61,'Web Resource'],[62,'Site Map'],[63,'Connection Role'],[66,'Custom Control'],[68,'Custom Control Default Config'],[70,'Field Security Profile'],[71,'Field Permission'],[90,'Plug-in Type'],[91,'Plug-in Assembly'],[92,'SDK Message Processing Step'],[93,'SDK Message Processing Step Image'],[95,'Service Endpoint'],[150,'Routing Rule'],[151,'Routing Rule Item'],[152,'SLA'],[153,'SLA Item'],[154,'Convert Rule'],[155,'Convert Rule Item'],[161,'Mobile Offline Profile'],[162,'Mobile Offline Profile Item'],[165,'Similarity Rule'],[300,'Canvas App'],[380,'Environment Variable Definition'],[381,'Environment Variable Value']
+      ];
+      $componentType.innerHTML = '';
+      fallback.forEach(([v,l]) => { componentTypeOptions.set(v,l); const o=document.createElement('option'); o.value=v; o.textContent=l + (DELETION_SUPPORTED.has(v)?'':' (deps-only)'); $componentType.appendChild(o); });
+    }
+  }
+
+  async function retrieveDependencies(){
+    saveSettings();
+    clearDepsTables();
+    $btnDelete.disabled = true;
+    $deleteStatus.textContent = '—';
+
+    const org = $orgUrl.value.trim().replace(/\/$/, '');
+    const guid = $objectId.value.trim();
+    const ct = Number($componentType.value);
+
+    if(!validOrg(org)){ $depsStatus.textContent = 'Invalid org URL.'; return; }
+    if(!isGuid(guid)){ $depsStatus.textContent = 'Invalid GUID.'; return; }
+
+    const token = await acquireToken();
+
+    // OData v4 function for blockers
+    const url = `${org}/api/data/v9.2/RetrieveDependenciesForDelete(ObjectId=${guid},ComponentType=${ct})`;
+
+    const res = await fetch(url, {
+      method:'GET',
+      headers:{
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+        'OData-MaxVersion':'4.0',
+        'OData-Version':'4.0',
+        'Prefer':'odata.include-annotations="*"'
+      }
+    });
+
+    const ok = res.ok;
+    const data = await res.json().catch(() => ({}));
+    $raw.textContent = JSON.stringify(data, null, 2);
+
+    if(!ok){
+      $depsStatus.textContent = 'Error: ' + (data && (data.error?.message || res.statusText));
+      return;
+    }
+
+    const items = data.value || [];
+    $depsTables.style.display = '';
+
+    if(!items.length){
+      $depsStatus.innerHTML = `<span class="ok">No blocking dependencies found for ${componentTypeLabel(ct)}.</span>`;
+      $btnDelete.disabled = ($confirmText.value.trim() !== 'DELETE');
+    } else {
+      $depsStatus.innerHTML = `<span class="danger-text">${items.length} blocking dependencies found.</span>`;
+    }
+
+    // render blockers
+    items.forEach((d, i) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${i+1}</td>
+        <td>${d["dependentcomponenttype@OData.Community.Display.V1.FormattedValue"] || ''}</td>
+        <td><code>${d.dependentcomponentobjectid || ''}</code></td>
+        <td>${d["requiredcomponenttype@OData.Community.Display.V1.FormattedValue"] || ''}</td>
+        <td><code>${d.requiredcomponentobjectid || ''}</code></td>
+        <td>${d.relationshipname || ''}</td>
+      `;
+      $depsBody.appendChild(tr);
+    });
+
+    // Downstream dependents (optional)
+    if ($toggleDependents.checked){
+      try{
+        const url2 = `${org}/api/data/v9.2/RetrieveDependentComponents(ObjectId=${guid},ComponentType=${ct})`;
+        const res2 = await fetch(url2, {
+          headers:{
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            'OData-MaxVersion':'4.0',
+            'OData-Version':'4.0',
+            'Prefer':'odata.include-annotations="*"'
+          }
+        });
+        const data2 = await res2.json().catch(()=>({}));
+        // Append to raw for debugging
+        $raw.textContent += '\n\n// RetrieveDependentComponents\n' + JSON.stringify(data2, null, 2);
+        const items2 = (data2 && data2.value) || [];
+        if (items2.length){
+          $downstreamWrap.style.display = '';
+          items2.forEach((d, i) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>${i+1}</td>
+              <td>${d["dependentcomponenttype@OData.Community.Display.V1.FormattedValue"] || ''}</td>
+              <td><code>${d.dependentcomponentobjectid || ''}</code></td>
+              <td>${d["requiredcomponenttype@OData.Community.Display.V1.FormattedValue"] || ''}</td>
+              <td><code>${d.requiredcomponentobjectid || ''}</code></td>
+              <td>${d.relationshipname || ''}</td>
+            `;
+            $downstreamBody.appendChild(tr);
+          });
+        }
+      }catch(e){ console.warn('Downstream dependents call failed', e); }
+    }
+  }
+
+  async function deleteComponent(){
+    saveSettings();
+    $deleteStatus.textContent = '';
+
+    const org = $orgUrl.value.trim();
+    const guid = $objectId.value.trim();
+    const ct = Number($componentType.value);
+    const label = componentTypeLabel(ct);
+
+    if($confirmText.value.trim() !== 'DELETE'){
+      $deleteStatus.textContent = 'Type DELETE to confirm.'; return;
+    }
+
+    const delUrl = buildDeleteUrl(org, ct, guid, label);
+    if(!delUrl){
+      $deleteStatus.textContent = `Generic delete not implemented for ${label} (type ${ct}). Use solution-aware deletion or table-specific logic.`;
+      return;
+    }
+
+    if($dryRun.value === 'true'){
+      $deleteStatus.textContent = `[dry‑run] Would DELETE ${delUrl}`;
+      return;
+    }
+
+    const token = await acquireToken();
+
+    const res = await fetch(delUrl, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+        'OData-MaxVersion':'4.0',
+        'OData-Version':'4.0'
+      }
+    });
+
+    if(res.status === 204){
+      $deleteStatus.innerHTML = `<span class="ok">Deleted.</span>`;
+    } else {
+      let body = {};
+      try{ body = await res.json(); }catch{}
+      $deleteStatus.innerHTML = `<span class="danger-text">Delete failed:</span> ${(body.error && body.error.message) || res.statusText}`;
+    }
+  }
+
+  // --- Wiring ---
+  loadSettings();
+  setUiAuth();
+
+  $btnInit.addEventListener('click', async () => {
+    try{ saveSettings(); await ensureMsal(); setUiAuth(); $authStatus.textContent = 'MSAL initialized.'; await hydrateComponentTypes(); }
+    catch(e){ $authStatus.textContent = 'Init failed: ' + (e.message || e); }
+  });
+  $btnLogin.addEventListener('click', async () => { try{ await login(); } catch{} });
+  $btnLogout.addEventListener('click', async () => { try{ await logout(); } catch{} });
+  $btnDeps.addEventListener('click', async () => { try{ await retrieveDependencies(); } catch(e){ $depsStatus.textContent = 'Error: ' + (e.message || e); } });
+  $btnDelete.addEventListener('click', async () => { try{ await deleteComponent(); } catch(e){ $deleteStatus.textContent = 'Error: ' + (e.message || e); } });
+
+  $confirmText.addEventListener('input', () => {
+    const enabled = ($confirmText.value.trim() === 'DELETE');
+    // Only allow when no deps (message says so)
+    if(/No blocking dependencies/.test($depsStatus.textContent)){
+      $btnDelete.disabled = !enabled;
+    }
+  });
+
+  [$clientId, $tenantId, $orgUrl].forEach(x => x.addEventListener('change', () => { saveSettings(); setUiAuth(); }));
+})();
+</script>
+</body>
+</html>
